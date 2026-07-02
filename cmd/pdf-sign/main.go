@@ -22,6 +22,7 @@ import (
 	"flag"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,7 +48,8 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	tlsKey := flag.String("tls-key", "", "TLS private key file")
 	clientCA := flag.String("client-ca", "", "PEM file of CAs for required TLS client certificates (mTLS); needs -tls-cert/-tls-key")
-	tsaURL := flag.String("tsa", "", "RFC 3161 Time Stamping Authority URL for PAdES-T signatures (e.g. http://timestamp.digicert.com)")
+	tsaURL := flag.String("tsa", "", "RFC 3161 Time Stamping Authority URL for PAdES-T signatures (https, e.g. https://timestamp.digicert.com)")
+	tsaInsecure := flag.Bool("tsa-allow-insecure", false, "permit a plaintext http TSA URL (internal networks only)")
 	flag.Parse()
 
 	// NIST 800-53r5 SC-24 (fail in known state) / CM-7 (least
@@ -58,6 +60,11 @@ func main() {
 	}
 	if *clientCA != "" && (*tlsCert == "" || *tlsKey == "") {
 		log.Fatal("-client-ca requires -tls-cert and -tls-key")
+	}
+	if *tsaURL != "" {
+		if err := signing.ValidateTSAURL(*tsaURL, *tsaInsecure); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	for _, dir := range []string{pendingDir, signedDir, archiveDir} {
@@ -154,8 +161,25 @@ func main() {
 		log.Printf("pdf-sign listening on https://%s", *addr)
 		log.Fatal(httpServer.ListenAndServeTLS(*tlsCert, *tlsKey))
 	}
+	warnIfPlaintextExposed(*addr)
 	log.Printf("pdf-sign listening on http://%s", *addr)
 	log.Fatal(httpServer.ListenAndServe())
+}
+
+// warnIfPlaintextExposed loudly flags a plaintext listener bound to a
+// non-loopback address, which would expose pending/signed documents on the
+// wire (SC-8). Serve HTTPS (-tls-cert) or bind loopback behind a
+// TLS-terminating proxy.
+func warnIfPlaintextExposed(addr string) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	ip := net.ParseIP(host)
+	loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
+	if !loopback {
+		log.Printf("WARNING: serving plaintext HTTP on non-loopback address %q — documents are transmitted unencrypted. Pass -tls-cert/-tls-key or bind to loopback behind a TLS-terminating proxy.", addr)
+	}
 }
 
 type server struct {
@@ -200,11 +224,16 @@ func (l *itemLocks) release(itemID string) {
 //
 // NIST 800-53r5 SC-18 (mobile code): only same-origin scripts may execute
 // on the signing page; injected inline code is blocked by the browser.
+// SC-8: HSTS is sent over TLS so browsers refuse a later plaintext
+// downgrade (never over plain HTTP, where it would be meaningless).
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

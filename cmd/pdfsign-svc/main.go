@@ -44,6 +44,7 @@ import (
 	"flag"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -64,7 +65,8 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "TLS private key file")
 	clientCA := flag.String("client-ca", "", "PEM file of CAs for required TLS client certificates (tenant auth)")
 	maxSessions := flag.Int("max-sessions", 32, "max concurrent signing sessions per tenant")
-	tsaURL := flag.String("tsa", "", "RFC 3161 Time Stamping Authority URL for PAdES-T signatures (e.g. http://timestamp.digicert.com)")
+	tsaURL := flag.String("tsa", "", "RFC 3161 Time Stamping Authority URL for PAdES-T signatures (https, e.g. https://timestamp.digicert.com)")
+	tsaInsecure := flag.Bool("tsa-allow-insecure", false, "permit a plaintext http TSA URL (internal networks only)")
 	flag.Parse()
 
 	// NIST 800-53r5 SC-13: report whether the Go FIPS 140-3 module is
@@ -74,6 +76,9 @@ func main() {
 
 	svc := &service{tsaURL: *tsaURL}
 	if *tsaURL != "" {
+		if err := signing.ValidateTSAURL(*tsaURL, *tsaInsecure); err != nil {
+			log.Fatal(err)
+		}
 		log.Printf("RFC 3161 timestamps enabled via %s", *tsaURL)
 	}
 
@@ -141,8 +146,24 @@ func main() {
 		log.Printf("pdfsign-svc listening on https://%s (mTLS tenant auth)", *addr)
 		log.Fatal(httpServer.ListenAndServeTLS(*tlsCert, *tlsKey))
 	}
+	warnIfPlaintextExposed(*addr)
 	log.Printf("pdfsign-svc listening on http://%s (DEV mode)", *addr)
 	log.Fatal(httpServer.ListenAndServe())
+}
+
+// warnIfPlaintextExposed loudly flags a plaintext listener bound to a
+// non-loopback address, which would expose bearer tokens and documents on
+// the wire (SC-8). Dev mode is meant for loopback only.
+func warnIfPlaintextExposed(addr string) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	ip := net.ParseIP(host)
+	loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
+	if !loopback {
+		log.Printf("WARNING: serving plaintext HTTP on non-loopback address %q — traffic (including bearer tokens and documents) is unencrypted. Use production mode (mTLS) or bind to loopback behind a TLS-terminating proxy.", addr)
+	}
 }
 
 type service struct {
@@ -234,7 +255,10 @@ func (s *service) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	cert, err := x509.ParseCertificate(certDER)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "certificate is not valid DER: "+err.Error())
+		// Log the detail; return a generic message (avoid echoing library
+		// internals to the caller).
+		log.Printf("create tenant=%s: certificate parse error: %v", signing.SanitizeLogField(tenant), err)
+		writeError(w, http.StatusBadRequest, "certificate is not valid DER")
 		return
 	}
 	if err := signing.ValidateCert(cert, s.signRoots); err != nil {
@@ -261,7 +285,8 @@ func (s *service) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// every signature lifecycle event records who (tenant + signer CN),
 	// what (session), and when (log timestamp). Ship stderr to the
 	// organization's log aggregation for AU-4/AU-9 (storage, protection).
-	log.Printf("create tenant=%s signer=%q session=%s pdf=%dB", tenant, cert.Subject.CommonName, sess.Token[:8], len(pdfBytes))
+	log.Printf("create tenant=%s signer=%q session=%s pdf=%dB",
+		signing.SanitizeLogField(tenant), signing.SanitizeLogField(cert.Subject.CommonName), sess.Token[:8], len(pdfBytes))
 
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"sessionId": sess.Token,
@@ -300,7 +325,7 @@ func (s *service) handleComplete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	log.Printf("complete tenant=%s session=%s -> %dB", tenant, r.PathValue("id")[:8], len(signedPDF))
+	log.Printf("complete tenant=%s session=%s -> %dB", signing.SanitizeLogField(tenant), r.PathValue("id")[:8], len(signedPDF))
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"pdf": base64.StdEncoding.EncodeToString(signedPDF),

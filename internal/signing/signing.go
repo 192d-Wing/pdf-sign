@@ -31,7 +31,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,6 +108,7 @@ type Manager struct {
 	onExpire    func(token, owner string) // called after the janitor cancels a session
 	mu          sync.Mutex
 	sessions    map[string]*Session
+	preparing   map[string]int // owner -> in-flight Prepare calls not yet stored
 }
 
 // NewManager creates a Manager and starts its expiry janitor. ttl bounds
@@ -121,6 +124,7 @@ func NewManager(ttl time.Duration, maxPerOwner int, onExpire func(token, owner s
 		ttl:         ttl,
 		maxPerOwner: maxPerOwner,
 		onExpire:    onExpire,
+		preparing:   make(map[string]int),
 		sessions:    make(map[string]*Session),
 	}
 	go m.janitor()
@@ -149,6 +153,17 @@ func (m *Manager) janitor() {
 	}
 }
 
+// releasePreparing drops one in-flight Prepare reservation for owner.
+func (m *Manager) releasePreparing(owner string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.preparing[owner] <= 1 {
+		delete(m.preparing, owner)
+	} else {
+		m.preparing[owner]--
+	}
+}
+
 // Owner reports the owner of an active session, so callers that key state
 // by owner can resolve a bare token.
 func (m *Manager) Owner(token string) (string, bool) {
@@ -165,18 +180,25 @@ func (m *Manager) Owner(token string) (string, bool) {
 // digest to be signed is known. The session stays open until Complete,
 // Cancel, or expiry.
 func (m *Manager) Prepare(pdfBytes []byte, cert *x509.Certificate, opts Options) (*Session, error) {
+	// Reserve a slot before doing any work. The quota counts both stored
+	// sessions and in-flight Prepare calls, so a burst of concurrent
+	// creates cannot exceed maxPerOwner even before their sessions are
+	// stored (SC-5(2): resource availability).
 	if m.maxPerOwner > 0 {
 		m.mu.Lock()
-		count := 0
+		count := m.preparing[opts.Owner]
 		for _, sess := range m.sessions {
 			if sess.Owner == opts.Owner {
 				count++
 			}
 		}
-		m.mu.Unlock()
 		if count >= m.maxPerOwner {
+			m.mu.Unlock()
 			return nil, fmt.Errorf("too many concurrent signing sessions for %q (max %d)", opts.Owner, m.maxPerOwner)
 		}
+		m.preparing[opts.Owner]++
+		m.mu.Unlock()
+		defer m.releasePreparing(opts.Owner)
 	}
 
 	reader := bytes.NewReader(pdfBytes)
@@ -371,6 +393,29 @@ func ValidateCert(cert *x509.Certificate, roots *x509.CertPool) error {
 	return nil
 }
 
+// ValidateTSAURL checks that a Time Stamping Authority URL is well-formed
+// and, unless allowInsecure is set, uses HTTPS. The pdfsign TSA client
+// runs without TLS by default, so a plaintext TSA over http:// exposes the
+// timestamp exchange to a network attacker who could stall or bloat the
+// response (SC-8: transmission confidentiality/integrity; SC-5: DoS).
+func ValidateTSAURL(raw string, allowInsecure bool) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid TSA URL: %w", err)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if allowInsecure {
+			return nil
+		}
+		return errors.New("TSA URL must use https (pass -tsa-allow-insecure to permit http for an internal TSA)")
+	default:
+		return fmt.Errorf("TSA URL must be http or https, got %q", u.Scheme)
+	}
+}
+
 // LoadCertPool reads a PEM bundle into a certificate pool.
 func LoadCertPool(path string) (*x509.CertPool, error) {
 	pem, err := os.ReadFile(path)
@@ -389,6 +434,24 @@ func LoadCertPool(path string) (*x509.CertPool, error) {
 // NIST 800-53r5 SC-23(3) (unique system-generated session identifiers):
 // 128 bits from crypto/rand; identifiers are single-use (takeOwned
 // removes them) and expire at the session TTL.
+// SanitizeLogField strips control characters (CR/LF/tabs and other
+// non-printables) from a value before it is written to a log line.
+// Certificate CNs are attacker-influenceable up to the issuing CA's
+// policy; sanitizing prevents forged or split audit records (AU-9: audit
+// information integrity).
+func SanitizeLogField(s string) string {
+	const maxLen = 256
+	if len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '?'
+		}
+		return r
+	}, s)
+}
+
 func newToken() (string, error) {
 	b := make([]byte, tokenLength)
 	if _, err := rand.Read(b); err != nil {

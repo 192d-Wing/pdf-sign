@@ -111,7 +111,9 @@ func (s *server) handleSignStart(w http.ResponseWriter, r *http.Request) {
 	}
 	cert, err := x509.ParseCertificate(certDER)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "certificate is not valid DER: "+err.Error())
+		// Log the detail; return a generic message.
+		log.Printf("sign/start item=%s: certificate parse error: %v", signing.SanitizeLogField(req.ItemID), err)
+		writeError(w, http.StatusBadRequest, "certificate is not valid DER")
 		return
 	}
 	if status, err := s.authorizeSigningCert(r, cert); err != nil {
@@ -140,7 +142,8 @@ func (s *server) handleSignStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	log.Printf("sign/start item=%s signer=%q token=%s", req.ItemID, cert.Subject.CommonName, sess.Token[:8])
+	log.Printf("sign/start item=%s signer=%q token=%s",
+		signing.SanitizeLogField(req.ItemID), signing.SanitizeLogField(cert.Subject.CommonName), sess.Token[:8])
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"token":  sess.Token,
