@@ -139,8 +139,11 @@ signature before embedding, and caps concurrent sessions per tenant
 A browser extension + native-messaging host that signs with a real card via
 Windows CNG. The web app auto-detects it and falls back to demo mode. See
 [docs/client_design.md](docs/client_design.md) for the full protocol and
-security model of the client side, and
-[docs/deployment.md](docs/deployment.md) for rolling all of this out.
+security model of the client side,
+[docs/deployment.md](docs/deployment.md) for rolling all of this out, and
+[docs/nist-800-53-mapping.md](docs/nist-800-53-mapping.md) for the NIST
+800-53 Rev 5 control matrix (ATO artifacts; code is annotated with
+`NIST 800-53r5` comments at each enforcing function).
 
 ```mermaid
 flowchart LR
@@ -208,3 +211,7 @@ with GPO/Intune.
    and a CSP blocks injected scripts on the approval page — but the card
    still signs a digest it cannot display. Keep the server trustworthy:
    it is part of the signing TCB.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.

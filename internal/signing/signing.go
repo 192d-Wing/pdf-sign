@@ -11,6 +11,13 @@
 // Owner string chosen by the caller (a tenant identity, a user, or an
 // application-specific key); Complete and Cancel require the same owner,
 // and per-owner concurrency can be capped.
+//
+// NIST 800-53r5: this package is the primary implementation point for
+// AU-10 (non-repudiation) — documents are bound to the signer's PKI
+// identity via PAdES digital signatures — and SC-13 (cryptographic
+// protection: SHA-256 digests, RSA/ECDSA verification via Go stdlib
+// crypto). Per-control annotations appear at the enforcing functions;
+// see docs/nist-800-53-mapping.md for the consolidated ATO matrix.
 package signing
 
 import (
@@ -96,6 +103,11 @@ type Manager struct {
 // NewManager creates a Manager and starts its expiry janitor. ttl bounds
 // how long a prepared session may wait for its signature; onExpire (may be
 // nil) lets the caller release any state keyed to the session.
+//
+// NIST 800-53r5 AC-12 (session termination): abandoned signing sessions
+// are terminated automatically at ttl. SC-5(2) (resource availability):
+// maxPerOwner caps concurrent sessions — and therefore parked goroutines
+// and in-memory documents — per owner/tenant.
 func NewManager(ttl time.Duration, maxPerOwner int, onExpire func(token, owner string)) *Manager {
 	m := &Manager{
 		ttl:         ttl,
@@ -285,6 +297,10 @@ func (m *Manager) Cancel(token, owner string) error {
 // takeOwned removes and returns the session iff the owner matches; exactly
 // one caller ever obtains a given session, which makes closing or sending
 // on sigCh race-free.
+//
+// NIST 800-53r5 AC-3 (access enforcement): the owner check scopes every
+// Complete/Cancel to the identity that created the session, so one tenant
+// can never finish or abort another tenant's signature.
 func (m *Manager) takeOwned(token, owner string) *Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -300,6 +316,12 @@ func (m *Manager) takeOwned(token, owner string) *Session {
 // key of the certificate the session was prepared with. Without this,
 // garbage from a broken (or malicious) client would be embedded into the
 // document.
+//
+// NIST 800-53r5 SI-7 (software and information integrity) and SI-10
+// (input validation): client-supplied signature bytes are
+// cryptographically validated before being embedded into the record
+// copy. SC-13: verification uses FIPS-approved algorithms (RSA PKCS#1
+// v1.5 / ECDSA with SHA-256).
 func verifyRawSignature(pub crypto.PublicKey, digest, signature []byte) error {
 	switch key := pub.(type) {
 	case *rsa.PublicKey:
@@ -317,6 +339,11 @@ func verifyRawSignature(pub crypto.PublicKey, digest, signature []byte) error {
 // ValidateCert enforces the certificate policy for signing: digital
 // signature key usage, and (when roots is non-nil) a chain to a trusted
 // CA.
+//
+// NIST 800-53r5 IA-5(2) (PKI-based authentication): certification-path
+// validation to organization-configured trust anchors before any signing
+// work is performed. SC-17 (PKI certificates): the trust anchors are the
+// organization's approved CAs supplied via -sign-ca.
 func ValidateCert(cert *x509.Certificate, roots *x509.CertPool) error {
 	if cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
 		return errors.New("certificate does not allow digital signatures")
@@ -348,6 +375,11 @@ func LoadCertPool(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
+// newToken generates the session identifier.
+//
+// NIST 800-53r5 SC-23(3) (unique system-generated session identifiers):
+// 128 bits from crypto/rand; identifiers are single-use (takeOwned
+// removes them) and expire at the session TTL.
 func newToken() (string, error) {
 	b := make([]byte, tokenLength)
 	if _, err := rand.Read(b); err != nil {

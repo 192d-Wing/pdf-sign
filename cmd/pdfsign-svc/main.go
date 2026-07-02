@@ -67,6 +67,10 @@ func main() {
 
 	svc := &service{}
 
+	// NIST 800-53r5 CM-7 (least functionality): development bearer-token
+	// auth cannot coexist with production tenant auth, and production
+	// refuses to start without mTLS + signing-cert validation configured
+	// (SC-24: fail to a known secure state at startup, not at first use).
 	if *dev {
 		if *clientCA != "" {
 			log.Fatal("-dev and -client-ca are mutually exclusive: bearer tokens are for development only")
@@ -140,6 +144,12 @@ type service struct {
 // tenant authenticates the request and returns the tenant identity.
 // mTLS mode: the client certificate CN (the TLS layer has already verified
 // the chain). Dev mode: the fixed identity "dev" behind the bearer token.
+//
+// NIST 800-53r5 IA-9 (service identification and authentication):
+// integrating backends authenticate with PKI client certificates over
+// mutual TLS; IA-5(2): chain validation to -client-ca is enforced by
+// tls.RequireAndVerifyClientCert before the request reaches handlers.
+// The dev-token comparison is constant-time to avoid a timing oracle.
 func (s *service) tenant(r *http.Request) (string, error) {
 	if s.devToken != "" {
 		auth := r.Header.Get("Authorization")
@@ -166,6 +176,10 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// decodeJSON enforces content type and a body size cap before decoding.
+//
+// NIST 800-53r5 SI-10 (information input validation) and SC-5 (denial-of-
+// service protection): strict media type, bounded request bodies.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
@@ -231,6 +245,10 @@ func (s *service) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	// NIST 800-53r5 AU-2/AU-3/AU-12 (audit events, content, generation):
+	// every signature lifecycle event records who (tenant + signer CN),
+	// what (session), and when (log timestamp). Ship stderr to the
+	// organization's log aggregation for AU-4/AU-9 (storage, protection).
 	log.Printf("create tenant=%s signer=%q session=%s pdf=%dB", tenant, cert.Subject.CommonName, sess.Token[:8], len(pdfBytes))
 
 	writeJSON(w, http.StatusCreated, map[string]string{

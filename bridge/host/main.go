@@ -17,6 +17,12 @@
 //
 // Errors are returned as {"error":"..."}.
 //
+// NIST 800-53r5 SC-7 supporting / CM-7 (least functionality): the host
+// opens no network listeners — its only I/O is the stdio pipe created by
+// the browser, and it exits after one request. The browser enforces
+// AC-3: only the extension ID in the registered host manifest's
+// allowed_origins can spawn this process.
+//
 // Debugging: run `pdfsign-bridge.exe -cli list` (or `-cli ping`) to invoke
 // a command directly without the length-prefixed framing.
 package main

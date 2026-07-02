@@ -48,6 +48,9 @@ func main() {
 	clientCA := flag.String("client-ca", "", "PEM file of CAs for required TLS client certificates (mTLS); needs -tls-cert/-tls-key")
 	flag.Parse()
 
+	// NIST 800-53r5 SC-24 (fail in known state) / CM-7 (least
+	// functionality): production cannot start without signing-cert
+	// validation, and the demo signing oracle exists only behind -demo.
 	if !*demo && *signCA == "" {
 		log.Fatal("refusing to start: pass -sign-ca <roots.pem> to validate signing certificates, or -demo for development mode")
 	}
@@ -127,6 +130,10 @@ func main() {
 			if err != nil {
 				log.Fatalf("load -client-ca: %v", err)
 			}
+			// NIST 800-53r5 IA-2(12) (acceptance of PIV credentials):
+			// users authenticate with their smart card's TLS client
+			// certificate; SC-8(1)/SC-23: TLS provides transmission
+			// confidentiality, integrity, and session authenticity.
 			httpServer.TLSConfig = &tls.Config{
 				ClientAuth: tls.RequireAndVerifyClientCert,
 				ClientCAs:  pool,
@@ -178,6 +185,9 @@ func (l *itemLocks) release(itemID string) {
 // securityHeaders sets a CSP that blocks injected inline scripts — the
 // approval page drives smart-card signing, so XSS there matters more than
 // usual.
+//
+// NIST 800-53r5 SC-18 (mobile code): only same-origin scripts may execute
+// on the signing page; injected inline code is blocked by the browser.
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy",

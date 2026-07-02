@@ -123,6 +123,9 @@ func listSigningCertificates() ([]certEntry, error) {
 	// Best signing candidate first: on PIV/CAC cards the *signature*
 	// certificate carries the ContentCommitment (non-repudiation) bit,
 	// while the authentication certificate does not.
+	// NIST 800-53r5 AU-10 (non-repudiation): preferring the
+	// non-repudiation certificate keeps document signatures attributable
+	// under the issuing PKI's certificate policy.
 	sort.SliceStable(entries, func(i, j int) bool {
 		return scores[entries[i].Thumbprint] > scores[entries[j].Thumbprint]
 	})
@@ -132,6 +135,9 @@ func listSigningCertificates() ([]certEntry, error) {
 // certWarning flags conditions the user should see before signing, e.g.
 // the CAC signature cert expired and the authentication cert would be
 // used instead, or the cert is about to expire.
+//
+// NIST 800-53r5 IA-5(2) supporting: surfaces credential-lifetime and
+// key-usage anomalies to the user instead of silently degrading.
 func certWarning(cert *x509.Certificate, now time.Time) string {
 	var warnings []string
 	if cert.KeyUsage&x509.KeyUsageContentCommitment == 0 {
@@ -199,6 +205,13 @@ func hasNCryptKey(ctx *windows.CertContext) bool {
 // signDigest signs a SHA-256 digest with the private key of the cert
 // identified by thumbprint. Windows shows the PIN prompt as needed.
 // Returns PKCS#1 v1.5 for RSA keys, ASN.1 DER for ECDSA keys.
+//
+// NIST 800-53r5 IA-2(1)/(2) (multi-factor authentication): each signature
+// requires the smart card (have) plus its PIN (know), enforced by the
+// card through Windows CNG. SC-12 (key establishment and management):
+// the private key never leaves the card — this process only ever holds a
+// key handle. SC-13: signing is performed by the card/CNG cryptographic
+// provider.
 func signDigest(thumbprint string, digest []byte) ([]byte, error) {
 	if len(digest) != 32 {
 		return nil, errors.New("expected a 32-byte SHA-256 digest")

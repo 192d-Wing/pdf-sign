@@ -31,6 +31,9 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 
 // decodeJSON enforces a JSON content type (so plain-text cross-site form
 // posts are rejected) and a body size cap before decoding into v.
+//
+// NIST 800-53r5 SI-10 (information input validation) and SC-5 (denial-of-
+// service protection).
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
@@ -47,6 +50,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 // client wants to sign with: it must be usable for signatures, chain to a
 // trusted CA when -sign-ca is set, and belong to the mTLS-authenticated
 // user when -client-ca is set. Returns the HTTP status to use on failure.
+//
+// NIST 800-53r5 IA-5(2) (PKI-based authentication: path validation to
+// trust anchors), AC-3/AC-6 (access enforcement, least privilege: the
+// CN match stops an authenticated user from signing as anyone but
+// themselves), AU-10 (non-repudiation: the signature identity is bound
+// to the authenticated session identity).
 func (s *server) authorizeSigningCert(r *http.Request, cert *x509.Certificate) (int, error) {
 	if err := signing.ValidateCert(cert, s.signRoots); err != nil {
 		return http.StatusForbidden, err
