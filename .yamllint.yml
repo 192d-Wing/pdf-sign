@@ -1,0 +1,18 @@
+# yamllint config tuned for GitHub Actions / GoReleaser YAML.
+# Run:  uvx yamllint .   (or: yamllint .)
+extends: default
+
+rules:
+  # SHA-pinned `uses:` lines (+ version comments) and image digests are long
+  # by necessity — length is not a meaningful signal here.
+  line-length: disable
+  # Allow the GitHub Actions `on:` key without the boolean/"truthy" complaint.
+  truthy:
+    check-keys: false
+  # Workflows don't use `---` document markers.
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+  # Permit the readable `{ key: val, ... }` flow style used in matrix includes.
+  braces:
+    max-spaces-inside: 1

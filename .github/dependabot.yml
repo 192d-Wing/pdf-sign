@@ -1,0 +1,63 @@
+version: 2
+updates:
+  # ---------------------------------------------------------------------------
+  # Go modules
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # One PR per week for all patch/minor Go bumps keeps the noise down.
+      go-modules:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # digitorus/pdf v0.2.0 unexported Reader.Resolve, which the pinned
+      # digitorus/pdfsign release still calls (verify/verify.go). Upstream
+      # pdfsign deliberately stays on pdf v0.1.2, so hold here until pdfsign
+      # migrates. See the note in go.mod.
+      - dependency-name: "github.com/digitorus/pdf"
+        versions: [">= 0.2.0"]
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # ---------------------------------------------------------------------------
+  # Dockerfile (pdfsign-svc base image)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: docker
+    directory: "/deploy/docker"
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "chore(docker)"

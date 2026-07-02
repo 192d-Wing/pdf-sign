@@ -1,0 +1,366 @@
+name: DevSecOps
+
+# Security pipeline supporting the DoD Certificate-to-Field / RMF Authority-to-
+# Operate (ATO) evidence package. Every gate emits SARIF into GitHub code
+# scanning (the "single pane" of findings) and/or uploads an artifact that can
+# be attached to the body of evidence (BoE) / POA&M.
+#
+#   SAST ......... CodeQL, gosec, Semgrep
+#   SCA .......... govulncheck, OSV-Scanner, Trivy (fs), go-licenses
+#   Secrets ...... Gitleaks
+#   IaC / config . Trivy config, Checkov  (Dockerfile, Helm, Kustomize)
+#   Container .... Trivy image + Grype + Syft SBOM
+#   DAST ......... OWASP ZAP baseline against the service in -dev mode
+#
+# See docs/devsecops.md for the NIST 800-53 / DoD DevSecOps control mapping.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly continuous monitoring (RMF ConMon) — catches newly disclosed CVEs
+    # in already-released code even when nothing changed.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devsecops-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # SAST
+  # ===========================================================================
+  codeql:
+    name: SAST · CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - uses: github/codeql-action/init@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        with:
+          languages: go
+          queries: security-extended,security-and-quality
+      - uses: github/codeql-action/autobuild@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+      - uses: github/codeql-action/analyze@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        with:
+          category: "/language:go"
+
+  gosec:
+    name: SAST · gosec
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Run gosec
+        uses: securego/gosec@9e6a9843d7a4a6e3e9a8539b02612c8a4aa3f889 # v2.27.1
+        with:
+          args: "-no-fail -fmt sarif -out gosec.sarif ./..."
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+  semgrep:
+    name: SAST · Semgrep
+    runs-on: ubuntu-latest
+    container:
+      # Pinned by digest (multi-arch manifest list) for supply-chain integrity.
+      image: semgrep/semgrep:1.168.0@sha256:59fbed6127ea7c5dde3ba6a85142733bb20ea9aaa36120c953904f1539aaf66e
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Run Semgrep
+        run: semgrep scan --sarif --output semgrep.sarif --error --config=auto
+        # DoD-relevant rule packs; --config=auto also pulls the registry rules.
+        env:
+          SEMGREP_RULES: "p/golang p/security-audit p/dockerfile p/secrets p/owasp-top-ten"
+        continue-on-error: true
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # ===========================================================================
+  # Secrets
+  # ===========================================================================
+  secrets:
+    name: Secrets · Gitleaks (CLI)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0 # scan full history, not just the tip
+
+      - name: Run Gitleaks (open-source CLI — no org license required)
+        env:
+          # Pin the release; the tarball is checksum-verified below.
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -sSfL "${base}/${asset}" -o "${asset}"
+          curl -sSfL "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o checksums.txt
+          grep "  ${asset}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${asset}" gitleaks
+          # Non-zero exit on findings -> the gate fails (SARIF still written).
+          ./gitleaks git . --redact --verbose \
+            --report-format sarif --report-path gitleaks.sarif
+
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        if: always()
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
+
+  # ===========================================================================
+  # SCA — dependency vulnerabilities + license compliance
+  # ===========================================================================
+  sca:
+    name: SCA · vulns & licenses
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Trivy filesystem (SCA)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln,license
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: License inventory (go-licenses)
+        run: |
+          go install github.com/google/go-licenses@latest
+          go-licenses report ./... --template=<(printf '{{range .}}{{.Name}},{{.LicenseName}}\n{{end}}') > licenses.csv 2>/dev/null || \
+            go-licenses csv ./... > licenses.csv
+          echo "--- Forbidden / restricted licenses (fails the gate if any) ---"
+          go-licenses check ./... --disallowed_types=forbidden,restricted
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: license-inventory
+          path: licenses.csv
+
+  osv-scanner:
+    name: SCA · OSV-Scanner
+    permissions:
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+    with:
+      scan-args: |-
+        --recursive
+        ./
+
+  # ===========================================================================
+  # IaC / configuration — Dockerfile, Helm, Kustomize
+  # ===========================================================================
+  iac:
+    name: IaC · Trivy config & Checkov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Trivy config (misconfiguration)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-config.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        if: always()
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+      # Checkov run via pip (pinned) rather than bridgecrewio/checkov-action:
+      # that action's latest release still pins an ancient checkov (2.0.930).
+      - name: Checkov (Dockerfile, Helm, Kustomize)
+        run: |
+          set -euo pipefail
+          pipx install checkov==3.3.6
+          checkov --directory . \
+            --framework dockerfile,helm,kustomize,github_actions \
+            --output cli --output sarif --output-file-path console,checkov-out \
+            --soft-fail
+          # checkov writes results_sarif.sarif into the output dir; normalize it.
+          cp "$(find checkov-out -name '*.sarif' | head -1)" checkov.sarif
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        if: always()
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  # ===========================================================================
+  # Container image — vuln scan + SBOM
+  # ===========================================================================
+  container:
+    name: Container · scan & SBOM (linux/${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build + scan the image natively on each Linux arch (no QEMU) so the
+        # vuln scan and SBOM reflect the actual per-arch binaries and base layer.
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build image (local, not pushed)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: pdfsign-svc:scan
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: pdfsign-svc:scan
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          # DoD gate: fail the build on unpatched Critical/High.
+          exit-code: "1"
+          ignore-unfixed: true
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image-${{ matrix.arch }}
+
+      - name: Grype image scan
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        id: grype
+        with:
+          image: pdfsign-svc:scan
+          severity-cutoff: high
+          fail-build: false
+      - uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3.36.3
+        if: always()
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: grype-${{ matrix.arch }}
+
+      - name: Generate SBOM (SPDX + CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: pdfsign-svc:scan
+          artifact-name: pdfsign-svc-${{ matrix.arch }}.spdx.json
+          output-file: pdfsign-svc-${{ matrix.arch }}.spdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: sbom-pdfsign-svc-${{ matrix.arch }}
+          path: pdfsign-svc-${{ matrix.arch }}.spdx.json
+
+  # ===========================================================================
+  # DAST — OWASP ZAP baseline against the service running in -dev mode
+  # ===========================================================================
+  dast:
+    name: DAST · OWASP ZAP baseline (linux/${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      issues: write # ZAP action files findings as issues on scheduled runs
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Start pdfsign-svc (dev mode, plain HTTP)
+        env:
+          PDFSIGN_DEV_TOKEN: dast-ci-token
+        run: |
+          go build -o pdfsign-svc ./cmd/pdfsign-svc
+          ./pdfsign-svc -dev -addr 127.0.0.1:8080 &
+          echo "SVC_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null "http://127.0.0.1:8080/" && break
+            # any TCP response is enough for ZAP to start; 401/404 is fine
+            (echo > /dev/tcp/127.0.0.1/8080) 2>/dev/null && break
+            sleep 1
+          done
+
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: "http://127.0.0.1:8080"
+          # Passive/baseline scan; -I => don't fail the job on warnings.
+          # Tighten to alerting once the ruleset is triaged into .zap/rules.tsv.
+          # For real API coverage, import an OpenAPI spec of /v1/signing-sessions
+          # (baseline spidering won't discover POST-only routes) — see docs.
+          cmd_options: "-I"
+          artifact_name: zap-baseline-${{ matrix.arch }}
+          # Only file/update the tracking issue once (from the amd64 leg) to
+          # avoid duplicate issues across the arch matrix.
+          allow_issue_writing: ${{ matrix.arch == 'amd64' }}
+          fail_action: false
+
+      - name: Stop service
+        if: always()
+        run: kill "${SVC_PID}" 2>/dev/null || true
