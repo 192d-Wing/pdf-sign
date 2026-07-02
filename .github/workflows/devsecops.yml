@@ -184,6 +184,9 @@ jobs:
   osv-scanner:
     name: SCA · OSV-Scanner
     permissions:
+      # The reusable workflow requires all three; omitting actions:read makes
+      # the whole run fail at startup (caller must grant what the callee needs).
+      actions: read
       contents: read
       security-events: write
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
