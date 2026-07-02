@@ -1,0 +1,12 @@
+# Image pin for Helm — copy, set the digest, and pass with -f:
+#   helm install pdfsign deploy/helm/pdfsign-svc -n pdfsign \
+#     -f values-image.example.yaml -f your-other-values.yaml
+#
+# `digest` takes precedence over `tag` and is what image scanners require
+# (Trivy KSV-0013 / Checkov CKV_K8S_43). Get it after pushing:
+#   docker buildx imagetools inspect registry.example.org/pdfsign-svc:0.1.0 \
+#     --format '{{.Manifest.Digest}}'
+image:
+  repository: registry.example.org/pdfsign-svc
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000" # REPLACE
+  pullPolicy: Always

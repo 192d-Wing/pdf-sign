@@ -9,10 +9,8 @@ resources:
   - service.yaml
   - networkpolicy.yaml
 
+# Dev/standalone default tag only. Real deployments go through an overlay,
+# which pins the registry + digest via ../../image (single source of truth).
 images:
   - name: pdfsign-svc
-    newName: registry.example.org/pdfsign-svc
-    # Pin by digest in production (scanners require it); replace with your
-    # published image's digest, e.g.:
-    #   digest: "sha256:<64-hex>"
     newTag: "0.1.0"

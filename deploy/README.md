@@ -37,6 +37,24 @@ docker build -f deploy/docker/Dockerfile -t registry.example.org/pdfsign-svc:0.1
 docker push registry.example.org/pdfsign-svc:0.1.0
 ```
 
+## 1a. Pin the image by digest
+
+Deployments reference the image by immutable digest (scanners require it;
+`:tag` is mutable). Grab the digest after pushing:
+
+```sh
+docker buildx imagetools inspect registry.example.org/pdfsign-svc:0.1.0 \
+  --format '{{.Manifest.Digest}}'
+```
+
+Put it in **one file** for whichever tool you use:
+
+- **Kustomize** — [`kustomize/image/kustomization.yaml`](kustomize/image/kustomization.yaml)
+  (`newName` + `digest`). Both overlays consume it; the base keeps a plain
+  tag for local `kubectl kustomize` inspection.
+- **Helm** — [`helm/pdfsign-svc/values-image.example.yaml`](helm/pdfsign-svc/values-image.example.yaml)
+  (`image.repository` + `image.digest`); pass it with `-f`.
+
 ## 2. Create the secrets
 
 ```sh

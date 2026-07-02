@@ -5,6 +5,10 @@ kind: Kustomization
 
 namespace: pdfsign
 
+# Pins the image by digest — edit deploy/kustomize/image.yaml.
+components:
+  - ../../image
+
 resources:
   - ../../base
   - ingressroutetcp.yaml

@@ -1,0 +1,20 @@
+# ===========================================================================
+# IMAGE PIN — EDIT THIS FILE before deploying. Single source of truth for
+# the registry and the immutable image digest, shared by both overlays.
+# ===========================================================================
+#
+# `digest` overrides any tag and is what image scanners require
+# (Trivy KSV-0013 / Checkov CKV_K8S_43). The value below is a PLACEHOLDER
+# (all zeros) so the manifests render; replace it with your real digest.
+#
+# Get the digest after pushing the image:
+#   docker buildx imagetools inspect ghcr.io/192d-wing/pdfsign-svc:0.1.0 \
+#     --format '{{.Manifest.Digest}}'
+#
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+images:
+  - name: pdfsign-svc
+    newName: ghcr.io/192d-wing/pdfsign-svc
+    digest: "sha256:7138e431b1f068deef9e7b721f2181ea3e034ce3ea7a1984d20a035e5aa0b253" # REPLACE

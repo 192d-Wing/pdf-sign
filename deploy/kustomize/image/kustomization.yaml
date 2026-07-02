@@ -1,0 +1,22 @@
+# ===========================================================================
+# IMAGE PIN — EDIT THIS FILE before deploying. Single source of truth for
+# the registry and the immutable image digest, shared by both overlays.
+# ===========================================================================
+#
+# `digest` overrides any tag and is what image scanners require
+# (Trivy KSV-0013 / Checkov CKV_K8S_43). The value below is a PLACEHOLDER
+# (all zeros) so the manifests render; replace it with your real digest.
+#
+# Get the digest after pushing the image:
+#   docker buildx imagetools inspect registry.example.org/pdfsign-svc:0.1.0 \
+#     --format '{{.Manifest.Digest}}'
+#
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+images:
+  # Single source of truth for the registry + immutable digest. `newName`
+  # sets your registry; `digest` pins the image (overrides the base tag).
+  - name: pdfsign-svc
+    newName: registry.example.org/pdfsign-svc
+    digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000" # REPLACE
