@@ -96,6 +96,11 @@ smart-card PDF signing without touching PDF or CMS internals. Browsers
 never call it directly — the integrating website's backend proxies, applies
 its own user authorization, and holds the API relationship.
 
+**Integrating another system?** See the step-by-step
+[docs/integration-guide.md](docs/integration-guide.md) — frontend SDK usage,
+backend proxy examples (Node and Python), the full API reference, and an
+integration checklist.
+
 ```mermaid
 sequenceDiagram
     participant FE as Integrator frontend<br/>(pdfsign-client.js + bridge)
