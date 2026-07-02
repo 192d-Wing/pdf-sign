@@ -65,6 +65,23 @@ type Options struct {
 	// when the signature was made and keeps it verifiable after the
 	// signer's certificate expires.
 	TSAURL string
+
+	// SignatureField, when set, signs INTO this existing empty signature
+	// field (fully qualified AcroForm name) instead of creating a new
+	// widget — for pre-built forms with named signature blocks (routed
+	// multi-signature forms like the DAF 2096).
+	SignatureField string
+
+	// FillFields maps fully qualified AcroForm text-field names to values
+	// written in the same incremental update as the signature. Used for
+	// routed multi-signature forms: each signer's identity line lands in
+	// the form's own field, covered by their signature, and the field is
+	// marked read-only for later steps.
+	FillFields map[string]string
+
+	// DropXFA removes the /XFA entry from the form (static XFA → plain
+	// AcroForm) so filled values render deterministically in all viewers.
+	DropXFA bool
 }
 
 // Session is an in-flight deferred signature.
@@ -242,6 +259,9 @@ func (m *Manager) Prepare(pdfBytes []byte, cert *x509.Certificate, opts Options)
 		DigestAlgorithm: crypto.SHA256,
 		Certificate:     cert,
 		TSA:             sign.TSA{URL: opts.TSAURL},
+		SignatureField:  opts.SignatureField,
+		FillFields:      opts.FillFields,
+		DropXFA:         opts.DropXFA,
 	}
 
 	go func() {
