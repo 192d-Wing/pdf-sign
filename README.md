@@ -1,5 +1,13 @@
 # pdf-sign
 
+[![CI](https://img.shields.io/github/actions/workflow/status/192d-Wing/pdf-sign/ci.yml?style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/192d-Wing/pdf-sign/actions/workflows/ci.yml)
+[![DevSecOps](https://img.shields.io/github/actions/workflow/status/192d-Wing/pdf-sign/devsecops.yml?style=for-the-badge&logo=githubactions&logoColor=white&label=DevSecOps)](https://github.com/192d-Wing/pdf-sign/actions/workflows/devsecops.yml)
+[![Release](https://img.shields.io/github/v/release/192d-Wing/pdf-sign?sort=semver&style=for-the-badge&logo=github&logoColor=white)](https://github.com/192d-Wing/pdf-sign/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/192d-Wing/pdf-sign/total?style=for-the-badge&logo=github&logoColor=white&label=downloads)](https://github.com/192d-Wing/pdf-sign/releases)
+[![Go Reference](https://img.shields.io/badge/reference-pkg.go.dev-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://pkg.go.dev/github.com/192d-wing/pdf-sign)
+[![Go](https://img.shields.io/github/go-mod/go-version/192d-Wing/pdf-sign?style=for-the-badge&logo=go&logoColor=white)](go.mod)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=for-the-badge)](LICENSE)
+
 Web-based PDF approval queue with smart-card digital signatures — no Adobe
 required. Go end-to-end, built on
 [digitorus/pdfsign](https://github.com/digitorus/pdfsign).
