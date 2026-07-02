@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdfsign-svc
+spec:
+  # Sessions are in-memory: keep 1 replica, or add sticky TCP routing
+  # before scaling out.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pdfsign-svc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pdfsign-svc
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pdfsign-svc
+          image: pdfsign-svc
+          args:
+            - -addr
+            - 0.0.0.0:8443
+            - -max-sessions
+            - "32"
+            - -sign-ca
+            - /etc/pdfsign/cas/sign-ca.pem
+            - -client-ca
+            - /etc/pdfsign/cas/client-ca.pem
+            - -tls-cert
+            - /etc/pdfsign/tls/tls.crt
+            - -tls-key
+            - /etc/pdfsign/tls/tls.key
+          ports:
+            - name: https
+              containerPort: 8443
+          # TCP probes: an HTTPS probe cannot pass the handshake because
+          # the server requires client certificates.
+          readinessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/pdfsign/tls
+              readOnly: true
+            - name: cas
+              mountPath: /etc/pdfsign/cas
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: pdfsign-tls # kubernetes.io/tls: tls.crt, tls.key
+        - name: cas
+          secret:
+            secretName: pdfsign-cas # Opaque: sign-ca.pem, client-ca.pem

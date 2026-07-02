@@ -1,0 +1,59 @@
+image:
+  repository: registry.example.org/pdfsign-svc
+  tag: "" # defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# Sessions are held in memory: keep 1 replica, or add sticky routing at the
+# TCP level before scaling out.
+replicaCount: 1
+
+listenPort: 8443
+maxSessions: 32 # concurrent signing sessions per tenant
+
+# Development mode: plain HTTP + bearer token. NEVER enable in production —
+# it disables mTLS tenant authentication entirely.
+dev:
+  enabled: false
+  # Existing Secret with key "token"; if empty, the service generates a
+  # token and prints it to the pod log.
+  tokenSecretName: ""
+
+tls:
+  # kubernetes.io/tls Secret (tls.crt / tls.key) for the server certificate.
+  secretName: pdfsign-tls
+
+cas:
+  # Opaque Secret holding the CA bundles:
+  #   sign-ca.pem   — CAs that end-user signing certificates chain to
+  #   client-ca.pem — CAs that issue tenant (backend) client certificates
+  secretName: pdfsign-cas
+
+service:
+  type: ClusterIP
+  port: 8443
+
+# ingress-nginx with SSL passthrough (standard k8s clusters). The
+# controller must run with --enable-ssl-passthrough.
+ingress:
+  enabled: false
+  className: nginx
+  host: sign.example.org
+
+# Traefik IngressRouteTCP with TLS passthrough (k3s default ingress).
+traefik:
+  ingressRouteTCP:
+    enabled: false
+    entryPoint: websecure
+    host: sign.example.org
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    # bound by -max-sessions x tenants x PDF size; raise for big documents
+    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,27 @@
+{{- if .Values.ingress.enabled }}
+# ingress-nginx with SSL passthrough: mTLS terminates inside the pod, so
+# the controller must NOT terminate TLS. Requires the controller flag
+# --enable-ssl-passthrough.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "pdfsign-svc.fullname" . }}
+  labels:
+    {{- include "pdfsign-svc.labels" . | nindent 4 }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "pdfsign-svc.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

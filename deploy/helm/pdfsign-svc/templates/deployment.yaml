@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pdfsign-svc.fullname" . }}
+  labels:
+    {{- include "pdfsign-svc.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "pdfsign-svc.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pdfsign-svc.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pdfsign-svc
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -addr
+            - 0.0.0.0:{{ .Values.listenPort }}
+            - -max-sessions
+            - {{ .Values.maxSessions | quote }}
+            {{- if .Values.dev.enabled }}
+            - -dev
+            {{- else }}
+            - -sign-ca
+            - /etc/pdfsign/cas/sign-ca.pem
+            - -client-ca
+            - /etc/pdfsign/cas/client-ca.pem
+            - -tls-cert
+            - /etc/pdfsign/tls/tls.crt
+            - -tls-key
+            - /etc/pdfsign/tls/tls.key
+            {{- end }}
+          {{- if and .Values.dev.enabled .Values.dev.tokenSecretName }}
+          env:
+            - name: PDFSIGN_DEV_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dev.tokenSecretName }}
+                  key: token
+          {{- end }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.listenPort }}
+          # TCP probes: an HTTPS probe cannot pass the handshake because the
+          # server requires client certificates.
+          readinessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if not .Values.dev.enabled }}
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/pdfsign/tls
+              readOnly: true
+            - name: cas
+              mountPath: /etc/pdfsign/cas
+              readOnly: true
+          {{- end }}
+      {{- if not .Values.dev.enabled }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+        - name: cas
+          secret:
+            secretName: {{ .Values.cas.secretName }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

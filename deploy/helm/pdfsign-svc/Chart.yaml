@@ -1,0 +1,9 @@
+apiVersion: v2
+name: pdfsign-svc
+description: >-
+  Deferred (remote-hash) smart-card PDF signing service. Terminates its own
+  TLS with required client certificates (mTLS tenant auth), so any ingress
+  in front of it must use TLS passthrough.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

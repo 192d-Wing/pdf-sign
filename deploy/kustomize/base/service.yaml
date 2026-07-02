@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pdfsign-svc
+spec:
+  type: ClusterIP
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: pdfsign-svc

@@ -1,0 +1,11 @@
+# Standard Kubernetes cluster with ingress-nginx.
+# The controller must run with --enable-ssl-passthrough.
+#   kubectl apply -k deploy/kustomize/overlays/k8s
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: pdfsign
+
+resources:
+  - ../../base
+  - ingress.yaml

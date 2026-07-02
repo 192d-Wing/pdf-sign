@@ -1,0 +1,25 @@
+pdfsign-svc {{ .Chart.AppVersion }} deployed.
+
+{{- if .Values.dev.enabled }}
+
+*** DEV MODE (bearer token, plain HTTP) — never use in production. ***
+Token: kubectl logs deploy/{{ include "pdfsign-svc.fullname" . }} | grep "bearer token"
+{{- else }}
+
+mTLS mode. Before pods go Ready, these Secrets must exist:
+  {{ .Values.tls.secretName }}   (kubernetes.io/tls: tls.crt, tls.key)
+  {{ .Values.cas.secretName }}   (Opaque: sign-ca.pem, client-ca.pem)
+
+Create them with:
+  kubectl create secret tls {{ .Values.tls.secretName }} --cert=server.crt --key=server.key
+  kubectl create secret generic {{ .Values.cas.secretName }} \
+    --from-file=sign-ca.pem --from-file=client-ca.pem
+
+Smoke test from an integrator host (expects 400 = auth OK, bad body):
+  curl --cert tenant.crt --key tenant.key --cacert internal-ca.pem \
+    https://{{ .Values.ingress.host | default .Values.traefik.ingressRouteTCP.host }}/v1/signing-sessions \
+    -X POST -H "Content-Type: application/json" -d '{}'
+{{- end }}
+
+Any ingress in front of this service MUST use TLS passthrough — terminating
+TLS at the edge breaks client-certificate (tenant) authentication.
