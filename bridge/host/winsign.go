@@ -107,6 +107,10 @@ func listSigningCertificates() ([]certEntry, error) {
 		if !hasNCryptKey(ctx) {
 			continue
 		}
+		// SHA-1 here is the Windows certificate *thumbprint* — an identifier
+		// used to look the cert up in the store, not a security function. It
+		// is not used for signing or integrity, so its collision weakness is
+		// irrelevant. nosemgrep: use-of-sha1
 		sum := sha1.Sum(der)
 		thumbprint := hex.EncodeToString(sum[:])
 		scores[thumbprint] = signingScore(cert)
@@ -233,6 +237,8 @@ func signDigest(thumbprint string, digest []byte) ([]byte, error) {
 			break
 		}
 		der := contextDER(ctx)
+		// SHA-1 thumbprint used only to match the requested certificate in
+		// the store (an identifier, not a security function). nosemgrep: use-of-sha1
 		sum := sha1.Sum(der)
 		if hex.EncodeToString(sum[:]) == want {
 			if cert, err = x509.ParseCertificate(der); err != nil {

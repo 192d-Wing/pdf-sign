@@ -4,7 +4,11 @@
 // Page -> bridge:  { type: 'pdfsign-bridge-request', id, cmd, payload }
 // Bridge -> page:  { type: 'pdfsign-bridge-response', id, response }
 window.addEventListener('message', (event) => {
-  if (event.source !== window) return;
+  // Accept requests only from this page's own window and origin. The
+  // content script is already injected solely on allowlisted origins
+  // (manifest matches), and background.js re-checks sender.url — this is
+  // the third, in-page layer.
+  if (event.source !== window || event.origin !== window.location.origin) return;
   const msg = event.data;
   if (!msg || msg.type !== 'pdfsign-bridge-request') return;
 

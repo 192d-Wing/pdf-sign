@@ -1,11 +1,18 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# Never deploy to the default namespace (overlays may override).
+namespace: pdfsign
+
 resources:
   - deployment.yaml
   - service.yaml
+  - networkpolicy.yaml
 
 images:
   - name: pdfsign-svc
     newName: registry.example.org/pdfsign-svc
+    # Pin by digest in production (scanners require it); replace with your
+    # published image's digest, e.g.:
+    #   digest: "sha256:<64-hex>"
     newTag: "0.1.0"

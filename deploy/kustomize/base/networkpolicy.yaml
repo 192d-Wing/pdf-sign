@@ -1,0 +1,30 @@
+# Default-deny-ish policy: only allow ingress to the service port and DNS +
+# TLS egress (for TSA/OCSP). Satisfies CKV2_K8S_6 / the "no NetworkPolicy"
+# findings and is genuine boundary protection (NIST 800-53r5 SC-7).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pdfsign-svc
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: pdfsign-svc
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8443
+  egress:
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Outbound TLS to the TSA / OCSP responders (tighten to specific CIDRs
+    # in production).
+    - ports:
+        - protocol: TCP
+          port: 443

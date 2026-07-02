@@ -4,6 +4,7 @@ metadata:
   name: {{ include "pdfsign-svc.fullname" . }}
   labels:
     {{- include "pdfsign-svc.labels" . | nindent 4 }}
+  # checkov:skip=CKV_K8S_21:Helm installs into the release namespace (helm -n).
 spec:
   type: {{ .Values.service.type }}
   ports:

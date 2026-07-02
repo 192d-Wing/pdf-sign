@@ -153,6 +153,7 @@ func main() {
 			// certificate; SC-8(1)/SC-23: TLS provides transmission
 			// confidentiality, integrity, and session authenticity.
 			httpServer.TLSConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
 				ClientAuth: tls.RequireAndVerifyClientCert,
 				ClientCAs:  pool,
 			}

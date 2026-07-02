@@ -25,7 +25,9 @@ export function createNativeBridge() {
   const pending = new Map();
 
   window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
+    // Only accept responses posted by our own content script on this exact
+    // origin (defense in depth on top of the source===window check).
+    if (event.source !== window || event.origin !== window.location.origin) return;
     const msg = event.data;
     if (!msg || msg.type !== 'pdfsign-bridge-response') return;
     const waiter = pending.get(msg.id);

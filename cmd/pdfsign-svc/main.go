@@ -67,7 +67,20 @@ func main() {
 	maxSessions := flag.Int("max-sessions", 32, "max concurrent signing sessions per tenant")
 	tsaURL := flag.String("tsa", "", "RFC 3161 Time Stamping Authority URL for PAdES-T signatures (https, e.g. https://timestamp.digicert.com)")
 	tsaInsecure := flag.Bool("tsa-allow-insecure", false, "permit a plaintext http TSA URL (internal networks only)")
+	healthcheck := flag.String("healthcheck", "", "dial the given host:port and exit 0 if reachable, 1 otherwise (for container HEALTHCHECK)")
 	flag.Parse()
+
+	// Container health probe: the image is distroless (no shell/curl), so
+	// the binary itself performs a TCP dial. mTLS means an HTTP probe can't
+	// complete the handshake, so reachability of the listener is the signal.
+	if *healthcheck != "" {
+		conn, err := net.DialTimeout("tcp", *healthcheck, 3*time.Second)
+		if err != nil {
+			log.Fatalf("healthcheck: %v", err)
+		}
+		_ = conn.Close()
+		return
+	}
 
 	// NIST 800-53r5 SC-13: report whether the Go FIPS 140-3 module is
 	// active (build with GOFIPS140=v1.0.0; see docs/deployment.md) so the
@@ -140,6 +153,7 @@ func main() {
 			log.Fatalf("load -client-ca: %v", err)
 		}
 		httpServer.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
 			ClientAuth: tls.RequireAndVerifyClientCert,
 			ClientCAs:  pool,
 		}

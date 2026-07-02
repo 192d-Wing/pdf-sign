@@ -1,0 +1,16 @@
+# Trivy suppressions — accepted with rationale (see docs/security-scanning.md).
+# Format: one finding ID per line. Keep this list short and justified.
+
+# Image pinned by digest at deploy time / via CD, not in the template
+# manifests (the example uses a tag so `kubectl apply -k` is runnable).
+AVD-KSV-0013
+
+# "Restrict to trusted registries" is enforced by a cluster admission
+# policy (e.g. Kyverno/Gatekeeper), not by a Deployment field.
+AVD-KSV-0125
+
+# Dependency license *detections* (not vulnerabilities). All are permissive
+# and compatible: BSD-2-Clause, BSD-3-Clause, MIT.
+BSD-2-Clause
+BSD-3-Clause
+MIT
