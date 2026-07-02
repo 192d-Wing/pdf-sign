@@ -55,6 +55,14 @@ type Options struct {
 	Name     string // signer name shown in the PDF signature dictionary
 	Reason   string
 	Location string
+
+	// TSAURL, when set, obtains an RFC 3161 timestamp for the signature
+	// from this Time Stamping Authority during Complete (PAdES-T).
+	//
+	// NIST 800-53r5 AU-10 (non-repudiation): a trusted timestamp proves
+	// when the signature was made and keeps it verifiable after the
+	// signer's certificate expires.
+	TSAURL string
 }
 
 // Session is an in-flight deferred signature.
@@ -211,6 +219,7 @@ func (m *Manager) Prepare(pdfBytes []byte, cert *x509.Certificate, opts Options)
 		Signer:          signer,
 		DigestAlgorithm: crypto.SHA256,
 		Certificate:     cert,
+		TSA:             sign.TSA{URL: opts.TSAURL},
 	}
 
 	go func() {

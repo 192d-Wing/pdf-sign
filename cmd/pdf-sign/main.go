@@ -15,6 +15,7 @@
 package main
 
 import (
+	"crypto/fips140"
 	"crypto/tls"
 	"crypto/x509"
 	"embed"
@@ -46,6 +47,7 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "TLS certificate file (enables HTTPS)")
 	tlsKey := flag.String("tls-key", "", "TLS private key file")
 	clientCA := flag.String("client-ca", "", "PEM file of CAs for required TLS client certificates (mTLS); needs -tls-cert/-tls-key")
+	tsaURL := flag.String("tsa", "", "RFC 3161 Time Stamping Authority URL for PAdES-T signatures (e.g. http://timestamp.digicert.com)")
 	flag.Parse()
 
 	// NIST 800-53r5 SC-24 (fail in known state) / CM-7 (least
@@ -67,10 +69,19 @@ func main() {
 		log.Fatalf("generate sample PDFs: %v", err)
 	}
 
+	// NIST 800-53r5 SC-13: report whether the Go FIPS 140-3 module is
+	// active (build with GOFIPS140=v1.0.0; see docs/deployment.md) so the
+	// mode is visible in the audit log.
+	log.Printf("FIPS 140-3 mode: %v", fips140.Enabled())
+
 	srv := &server{
-		locks: newItemLocks(),
-		demo:  *demo,
-		mtls:  *clientCA != "",
+		locks:  newItemLocks(),
+		demo:   *demo,
+		mtls:   *clientCA != "",
+		tsaURL: *tsaURL,
+	}
+	if *tsaURL != "" {
+		log.Printf("RFC 3161 timestamps enabled via %s", *tsaURL)
 	}
 	// Sessions are owned by the item ID; when one expires, free the item
 	// so it can be signed again.
@@ -153,6 +164,7 @@ type server struct {
 	card      *demoCard // nil unless -demo
 	demo      bool
 	mtls      bool
+	tsaURL    string         // empty = no RFC 3161 timestamp
 	signRoots *x509.CertPool // nil unless -sign-ca
 }
 

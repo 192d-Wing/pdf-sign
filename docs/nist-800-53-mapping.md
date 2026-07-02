@@ -18,7 +18,7 @@ noted in the last section.
 | AC-6 | Least Privilege | With mTLS login, a user may only sign with a certificate whose subject CN matches their authenticated identity. Containers run nonroot, read-only rootfs, all capabilities dropped. | `cmd/pdf-sign/handlers.go` (`authorizeSigningCert`), `deploy/helm/pdfsign-svc/templates/deployment.yaml`, `deploy/kustomize/base/deployment.yaml` |
 | AC-12 | Session Termination | Abandoned signing sessions are cancelled automatically at the 5-minute TTL; the parked cryptographic operation is unwound and in-memory document copies released. | `internal/signing/signing.go` (`NewManager`, `janitor`) |
 | AU-2 / AU-3 / AU-12 | Audit Events / Content / Generation | Every signature lifecycle event (session create, complete) is logged with tenant, signer CN, session ID, and timestamp. | `cmd/pdfsign-svc/main.go` (`handleCreate`, `handleComplete`), `cmd/pdf-sign/handlers.go` (`handleSignStart`, `handleSignFinish`) |
-| AU-10 | Non-repudiation | PAdES digital signatures bind documents to the signer's PKI identity. The bridge prefers the card's non-repudiation (ContentCommitment) certificate; with mTLS login the signature identity must match the session identity. | `internal/signing/` (package), `bridge/host/winsign.go` (cert ranking), `cmd/pdf-sign/handlers.go` |
+| AU-10 | Non-repudiation | PAdES digital signatures bind documents to the signer's PKI identity. The bridge prefers the card's non-repudiation (ContentCommitment) certificate; with mTLS login the signature identity must match the session identity. RFC 3161 trusted timestamps (`-tsa`) prove signing time and keep signatures verifiable after certificate expiry (PAdES-T). | `internal/signing/` (package, `Options.TSAURL`), `bridge/host/winsign.go` (cert ranking), `cmd/pdf-sign/handlers.go` |
 | CM-7 | Least Functionality | Demo signing oracle exists only behind `-demo`; dev bearer auth only behind `-dev` and mutually exclusive with tenant mTLS. Native host opens no network listeners and exits after one request. Distroless container (no shell). | `cmd/pdf-sign/main.go`, `cmd/pdfsign-svc/main.go`, `bridge/host/main.go`, `deploy/docker/Dockerfile` |
 | IA-2(1)/(2) | Multi-factor Authentication | Each signature requires the smart card (possession) plus PIN (knowledge), enforced by the card via Windows CNG. | `bridge/host/winsign.go` (`signDigest`) |
 | IA-2(12) | Acceptance of PIV Credentials | Optional mTLS login mode authenticates users with their PIV/CAC TLS client certificate against DoD CAs. | `cmd/pdf-sign/main.go` (TLS config) |
@@ -27,7 +27,7 @@ noted in the last section.
 | SC-5 / SC-5(2) | Denial-of-service Protection | Request body caps, strict content types, HTTP read/write/idle timeouts, and per-tenant concurrent-session quotas. | `cmd/*/main.go` (server timeouts), `decodeJSON` in both handlers, `internal/signing/signing.go` (`maxPerOwner`) |
 | SC-8 / SC-8(1) | Transmission Confidentiality and Integrity | TLS 1.2+ (Go crypto/tls defaults) for all server traffic in production modes; deployment manifests use TLS passthrough so encryption terminates only inside the pod. | `cmd/*/main.go`, `deploy/` (passthrough ingress) |
 | SC-12 | Cryptographic Key Establishment and Management | Signing private keys are generated and held on the smart card and never leave it; the host process holds only a CNG key handle. Server TLS keys are mounted from Kubernetes Secrets. | `bridge/host/winsign.go`, `deploy/` |
-| SC-13 | Cryptographic Protection | SHA-256 digests; RSA PKCS#1 v1.5 / ECDSA signatures produced by the card and verified with Go stdlib crypto; TLS via crypto/tls. | `internal/signing/signing.go`, `bridge/host/winsign.go` |
+| SC-13 | Cryptographic Protection | SHA-256 digests; RSA PKCS#1 v1.5 / ECDSA signatures produced by the card and verified with Go crypto; TLS via crypto/tls. Server binaries are built against the Go FIPS 140-3 Cryptographic Module (`GOFIPS140=v1.0.0`) and log `FIPS 140-3 mode: true` at startup as evidence; card-side signing uses the card's own validated module via Windows CNG. | `internal/signing/signing.go`, `bridge/host/winsign.go`, `cmd/*/main.go` (startup log), `deploy/docker/Dockerfile` |
 | SC-17 | PKI Certificates | Trust anchors are organization-approved CA bundles supplied as configuration (`-sign-ca`, `-client-ca`), not hardcoded. | `internal/signing/signing.go` (`LoadCertPool`), flag wiring in both `main.go` |
 | SC-18 | Mobile Code | Content-Security-Policy restricts the signing page to same-origin scripts; injected inline code does not execute. | `cmd/pdf-sign/main.go` (`securityHeaders`) |
 | SC-23 / SC-23(3) | Session Authenticity / Unique Session Identifiers | TLS session authenticity; signing-session tokens are 128-bit crypto/rand values, single-use, and expire at TTL. | `internal/signing/signing.go` (`newToken`, `takeOwned`) |
@@ -48,16 +48,22 @@ noted in the last section.
 
 ## Known gaps (POA&M candidates)
 
-- **AU-10 long-term validation**: no RFC 3161 trusted timestamp yet —
-  signatures are verifiable only while the signer's certificate chain is
-  valid. Planned: `SignData.TSA.URL` in `internal/signing`.
-- **SC-13 FIPS validation**: Go's standard crypto is not FIPS 140-3
-  validated by default; if the ATO requires a validated module, build with
-  the Go FIPS-140 mode (GODEBUG=fips140=on / BoringCrypto toolchain) and
-  document the module. Card-side signing already uses the card's validated
-  module via CNG.
 - **AU-9 in the demo app**: audit records go to stderr; protection and
   retention require the deployment to ship them to controlled storage.
 - **IA-5(2) revocation**: signing-cert chain validation does not yet check
   OCSP/CRL at signing time (verification-time revocation data exists in
-  the verify endpoint). Planned alongside LTV support.
+  the verify endpoint). Planned alongside LTV (PAdES-LT) support.
+- **TSA dependency (AU-10)**: timestamping requires `-tsa` to be
+  configured and the TSA reachable; signing fails closed when it is not.
+  Deployments must select an organization-approved TSA and monitor its
+  availability.
+
+## Resolved (formerly POA&M)
+
+- **RFC 3161 trusted timestamps** — implemented via `Options.TSAURL` /
+  `-tsa`; verified end-to-end against a public TSA (timestamp token
+  embedded, `timestampStatus: valid`).
+- **FIPS 140-3** — server binaries build with `GOFIPS140=v1.0.0` (Go
+  Cryptographic Module, frozen validated version); startup log line
+  provides runtime evidence. Verified: full signing flow passes with the
+  module enabled.

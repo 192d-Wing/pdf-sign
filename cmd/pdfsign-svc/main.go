@@ -32,6 +32,7 @@
 package main
 
 import (
+	"crypto/fips140"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
@@ -63,9 +64,18 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "TLS private key file")
 	clientCA := flag.String("client-ca", "", "PEM file of CAs for required TLS client certificates (tenant auth)")
 	maxSessions := flag.Int("max-sessions", 32, "max concurrent signing sessions per tenant")
+	tsaURL := flag.String("tsa", "", "RFC 3161 Time Stamping Authority URL for PAdES-T signatures (e.g. http://timestamp.digicert.com)")
 	flag.Parse()
 
-	svc := &service{}
+	// NIST 800-53r5 SC-13: report whether the Go FIPS 140-3 module is
+	// active (build with GOFIPS140=v1.0.0; see docs/deployment.md) so the
+	// mode is visible in the audit log.
+	log.Printf("FIPS 140-3 mode: %v", fips140.Enabled())
+
+	svc := &service{tsaURL: *tsaURL}
+	if *tsaURL != "" {
+		log.Printf("RFC 3161 timestamps enabled via %s", *tsaURL)
+	}
 
 	// NIST 800-53r5 CM-7 (least functionality): development bearer-token
 	// auth cannot coexist with production tenant auth, and production
@@ -139,6 +149,7 @@ type service struct {
 	signer    *signing.Manager
 	signRoots *x509.CertPool
 	devToken  string // non-empty only in -dev mode
+	tsaURL    string // empty = no RFC 3161 timestamp
 }
 
 // tenant authenticates the request and returns the tenant identity.
@@ -240,6 +251,7 @@ func (s *service) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Name:     name,
 		Reason:   req.Reason,
 		Location: req.Location,
+		TSAURL:   s.tsaURL,
 	})
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())

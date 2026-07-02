@@ -133,6 +133,7 @@ func (s *server) handleSignStart(w http.ResponseWriter, r *http.Request) {
 		Owner:  req.ItemID,
 		Name:   cert.Subject.CommonName,
 		Reason: "Approved in pdf-sign",
+		TSAURL: s.tsaURL,
 	})
 	if err != nil {
 		s.locks.release(req.ItemID)
@@ -243,20 +244,22 @@ func (s *server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type signerSummary struct {
-		Name           string `json:"name"`
-		Reason         string `json:"reason"`
-		ValidSignature bool   `json:"validSignature"`
-		TrustedIssuer  bool   `json:"trustedIssuer"`
-		TimeSource     string `json:"timeSource"`
+		Name            string `json:"name"`
+		Reason          string `json:"reason"`
+		ValidSignature  bool   `json:"validSignature"`
+		TrustedIssuer   bool   `json:"trustedIssuer"`
+		TimeSource      string `json:"timeSource"`
+		TimestampStatus string `json:"timestampStatus,omitempty"`
 	}
 	summaries := []signerSummary{}
 	for _, signer := range resp.Signers {
 		summaries = append(summaries, signerSummary{
-			Name:           signer.Name,
-			Reason:         signer.Reason,
-			ValidSignature: signer.ValidSignature,
-			TrustedIssuer:  signer.TrustedIssuer,
-			TimeSource:     signer.TimeSource,
+			Name:            signer.Name,
+			Reason:          signer.Reason,
+			ValidSignature:  signer.ValidSignature,
+			TrustedIssuer:   signer.TrustedIssuer,
+			TimeSource:      signer.TimeSource,
+			TimestampStatus: signer.TimestampStatus,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -27,6 +27,10 @@ spec:
             - 0.0.0.0:{{ .Values.listenPort }}
             - -max-sessions
             - {{ .Values.maxSessions | quote }}
+            {{- if .Values.tsaURL }}
+            - -tsa
+            - {{ .Values.tsaURL }}
+            {{- end }}
             {{- if .Values.dev.enabled }}
             - -dev
             {{- else }}

@@ -22,14 +22,25 @@ card hardware.
 
 ## 1. Build release artifacts
 
-On any machine with Go (binaries are static, no runtime dependencies):
+On any machine with Go (binaries are static, no runtime dependencies).
+Server binaries are built against the **Go FIPS 140-3 Cryptographic
+Module** (`GOFIPS140=v1.0.0` pins the frozen, validated module version;
+NIST 800-53r5 SC-13):
 
 ```powershell
-$v = "0.1.0"
+$env:GOFIPS140 = "v1.0.0"
 go build -trimpath -ldflags "-s -w" -o dist\pdf-sign.exe        .\cmd\pdf-sign
 go build -trimpath -ldflags "-s -w" -o dist\pdfsign-svc.exe     .\cmd\pdfsign-svc
 go build -trimpath -ldflags "-s -w" -o dist\pdfsign-bridge.exe  .\bridge\host
 ```
+
+Both server binaries log `FIPS 140-3 mode: true` at startup — capture that
+line as ATO evidence. Optional strict mode: run with
+`GODEBUG=fips140=only` to make any use of a non-approved algorithm an
+error instead of a fallback. (The bridge's SHA-1 use is only the Windows
+certificate-thumbprint convention, an identifier — not a security
+function; the card performs the actual signing in its own validated
+module.)
 
 For a Linux server host: `$env:GOOS='linux'; $env:GOARCH='amd64'` before the
 server builds (the bridge is Windows-only by design).
@@ -72,7 +83,8 @@ Collect these PEM bundles before configuring anything:
 pdf-sign.exe -addr 0.0.0.0:8443 `
   -sign-ca C:\pdfsign\sign-ca.pem `
   -tls-cert C:\pdfsign\server.crt -tls-key C:\pdfsign\server.key `
-  -client-ca C:\pdfsign\sign-ca.pem      # optional: CAC mTLS login
+  -client-ca C:\pdfsign\sign-ca.pem `    # optional: CAC mTLS login
+  -tsa http://timestamp.digicert.com     # RFC 3161 timestamps (PAdES-T)
 ```
 
 - Never pass `-demo` outside development; the binary refuses to start
@@ -89,8 +101,14 @@ pdfsign-svc.exe -addr 0.0.0.0:8443 `
   -sign-ca C:\pdfsign\sign-ca.pem `
   -tls-cert C:\pdfsign\server.crt -tls-key C:\pdfsign\server.key `
   -client-ca C:\pdfsign\client-ca.pem `
-  -max-sessions 32
+  -max-sessions 32 `
+  -tsa http://timestamp.digicert.com     # RFC 3161 timestamps (PAdES-T)
 ```
+
+Pick a TSA your organization approves (DoD environments typically have an
+internal TSA; DigiCert/Sectigo run public ones). The TSA must be reachable
+from the server — signatures fail closed if the timestamp request fails,
+so monitor TSA availability.
 
 - Issue each integrating website's backend a client certificate from the
   `client-ca`. Revoking a tenant = revoking (or just not renewing) its cert.
@@ -241,10 +259,10 @@ chain is trusted on the machine, a green check).
   upgrades: replace the exe; the extension updates through the store
   channel. Protocol changes must keep `pdfsign-client.js`, the extension,
   and the host in step — version all three together.
-- **Known limitation**: no RFC 3161 timestamping yet — signatures validate
-  only while the signer's cert chain is valid. Configure a TSA
-  (`SignData.TSA.URL` in `internal/signing`) before relying on long-term
-  validation.
+- **Timestamping**: run with `-tsa <url>` so signatures stay verifiable
+  after signer certificates expire (PAdES-T). Without it, validation
+  stops at cert expiry. Monitor TSA reachability — signing fails closed
+  when the TSA is down.
 
 ## 7. Rollout checklist
 

@@ -10,6 +10,11 @@ replicaCount: 1
 listenPort: 8443
 maxSessions: 32 # concurrent signing sessions per tenant
 
+# RFC 3161 Time Stamping Authority URL for PAdES-T signatures; empty
+# disables timestamping. Signatures without a timestamp stop verifying
+# once the signer's certificate expires.
+tsaURL: ""
+
 # Development mode: plain HTTP + bearer token. NEVER enable in production —
 # it disables mTLS tenant authentication entirely.
 dev:
